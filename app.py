@@ -1,63 +1,127 @@
+import streamlit as st
 import pandas as pd
-import numpy as np
-from sklearn.impute import KNNImputer
-from sklearn.ensemble import IsolationForest
-import re
+from utils.cleaner import CRMDataCleaner
+import time
+import base64
+import io
 
-# Load CRM data
-def load_crm_data(filepath):
-    try:
-        df = pd.read_csv(filepath)
-        print("Data loaded successfully.")
-        return df
-    except Exception as e:
-        print(f"Error loading file: {e}")
-        return pd.DataFrame()
+def get_table_download_link(df):
+    """Generates a download link for the cleaned DataFrame"""
+    csv = df.to_csv(index=False)
+    b64 = base64.b64encode(csv.encode()).decode()
+    return f'<a href="data:file/csv;base64,{b64}" download="cleaned_crm_data.csv">Download cleaned data</a>'
 
-# Basic data validation
-def validate_email(email):
-    pattern = r"^[\w\.-]+@[\w\.-]+\.\w+$"
-    return bool(re.match(pattern, str(email)))
-
-def validate_phone(phone):
-    return str(phone).isdigit() and (7 <= len(str(phone)) <= 15)
-
-def clean_and_validate_data(df):
-    df['valid_email'] = df['email'].apply(validate_email)
-    df['valid_phone'] = df['phone'].apply(validate_phone)
-    return df
-
-# Handle missing values
-def impute_missing_data(df):
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    imputer = KNNImputer(n_neighbors=3)
-    df[numeric_cols] = imputer.fit_transform(df[numeric_cols])
-    return df
-
-# Detect anomalies using Isolation Forest
-def detect_anomalies(df, contamination=0.01):
-    model = IsolationForest(contamination=contamination, random_state=42)
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    df['anomaly'] = model.fit_predict(df[numeric_cols])
-    return df
-
-# Save clean data
-def save_clean_data(df, output_path):
-    df.to_csv(output_path.replace('.xlsx', '.csv'), index=False)
-    print(f"Clean data saved to {output_path}")
-
-# Full pipeline
-def run_pipeline(input_path, output_path):
-    df = load_crm_data(input_path)
-    if df.empty:
-        return
-    df = clean_and_validate_data(df)
-    df = impute_missing_data(df)
-    df = detect_anomalies(df)
-    save_clean_data(df, output_path)
+def main():
+    # Configure page
+    st.set_page_config(
+        page_title="CRM Data Cleaner Pro",
+        page_icon="🧼",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Custom CSS
+    st.markdown("""
+    <style>
+        .stProgress > div > div > div > div {
+            background-color: #1E90FF;
+        }
+        .st-b7 {
+            color: #1E90FF;
+        }
+        .reportview-container .main .block-container {
+            padding-top: 2rem;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.title("🧼 CRM Data Cleaner Pro")
+    st.markdown("""
+    Upload your CRM data to automatically:
+    - 🚫 Remove duplicates (exact & fuzzy matches)
+    - 🧹 Clean and standardize formats
+    - ✅ Validate against business rules
+    - 📥 Download analysis-ready data
+    """)
+    
+    # File upload section
+    uploaded_file = st.file_uploader(
+        "Choose a CSV file",
+        type=["csv"],
+        accept_multiple_files=False,
+        help="Upload your raw CRM data in CSV format"
+    )
+    
+    cleaner = CRMDataCleaner()
+    
+    if uploaded_file is not None:
+        try:
+            # Read uploaded file
+            df = pd.read_csv(uploaded_file)
+            
+            with st.expander("🔍 Raw Data Preview", expanded=True):
+                st.dataframe(df.head())
+                st.info(f"Original data: {len(df)} records")
+            
+            # Processing options
+            st.sidebar.header("Cleaning Options")
+            strict_mode = st.sidebar.checkbox(
+                "Strict Validation Mode",
+                value=True,
+                help="Enable stricter validation rules"
+            )
+            
+            if st.button("✨ Clean Data", key="clean_button"):
+                with st.spinner("Cleaning your data..."):
+                    # Create progress bar
+                    progress_bar = st.progress(0)
+                    
+                    # Simulate progress for better UX
+                    for percent_complete in range(100):
+                        time.sleep(0.01)
+                        progress_bar.progress(percent_complete + 1)
+                    
+                    # Clean the data
+                    cleaned_df, report = cleaner.clean_dataset(df)
+                    
+                    # Display results
+                    st.success("Data cleaning complete!")
+                    st.balloons()
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.subheader("Cleaned Data Preview")
+                        st.dataframe(cleaned_df.head())
+                        st.info(f"Cleaned data: {len(cleaned_df)} records")
+                    
+                    with col2:
+                        st.subheader("Cleaning Report")
+                        
+                        if report.get('cleaning_status') == 'failed':
+                            st.error(f"Cleaning failed: {report.get('error')}")
+                        else:
+                            st.json({
+                                "Records Removed": report.get('rows_removed', 0),
+                                "Exact Duplicates Removed": report.get('exact_duplicates_removed', 0),
+                                "Fuzzy Duplicates Removed": report.get('fuzzy_duplicates_removed', 0),
+                                "Invalid Emails Removed": report.get('invalid_emails_removed', 0),
+                                "Invalid Phones Removed": report.get('invalid_phones_removed', 0),
+                                "Invalid Segments Removed": report.get('invalid_segments_removed', 0),
+                                "Missing Required Fields": report.get('missing_required_fields', {})
+                            })
+                    
+                    # Download section
+                    st.markdown("### Download Cleaned Data")
+                    st.markdown(get_table_download_link(cleaned_df), unsafe_allow_html=True)
+                    
+                    # Show complete cleaned data
+                    if st.checkbox("Show full cleaned data"):
+                        st.dataframe(cleaned_df)
+        
+        except Exception as e:
+            st.error(f"Error processing file: {str(e)}")
+            st.stop()
 
 if __name__ == "__main__":
-    input_file = "crm_customers.csv"      #input data 
-    output_file = "crm_cleaned.csv"       #output data 
-    run_pipeline(input_file, output_file)
-
+    main()
